@@ -15,9 +15,9 @@ class MixturePrecisionsLayer(Layer):
                  n_dim,
                  svi=True,
                  mWs_init=HeNormal(),
-                 mbs_init=Constant([0.]),
-                 sWs_init=Constant([-5.]),
-                 sbs_init=Constant([-5.]),
+                 mbs_init=Constant(0.),
+                 sWs_init=Constant(-5.),
+                 sbs_init=Constant(-5.),
                  seed=None,
                  **kwargs):
         """Fully connected layer for mixture precisions, optional weight uncertainty
@@ -60,7 +60,7 @@ class MixturePrecisionsLayer(Layer):
                     for c in range(n_components)]
 
         if self.svi:
-            self._srng = np.random.RandomState(seed)
+            self.rng = np.random.RandomState(seed=seed)
             self.sWs = [self.add_param(sWs_init,
                                        (self.input_shape[1], self.n_dim ** 2),
                                        name='sW' + str(c), sp=True, wp=True)
@@ -91,7 +91,7 @@ class MixturePrecisionsLayer(Layer):
                             inp, mW) + mb).view((-1, self.n_dim, self.n_dim)) for mW, mb in zip(self.mWs, self.mbs)]
         else:
             uas = [
-                Variable(dtype(self._srng.normal(
+                Variable(dtype(self.rng.normal(
                     size=(inp.shape[0],
                      self.n_dim**2)))) for i in range(
                     self.n_components)]

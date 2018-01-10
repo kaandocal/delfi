@@ -13,9 +13,9 @@ class MixtureMeansLayer(Layer):
                  n_dim,
                  svi=True,
                  mWs_init=HeNormal(),
-                 mbs_init=Constant([0.]),
-                 sWs_init=Constant([-5.]),
-                 sbs_init=Constant([-5.]),
+                 mbs_init=Constant(0.),
+                 sWs_init=Constant(-5.),
+                 sbs_init=Constant(-5.),
                  seed=None,
                  **kwargs):
         """Fully connected layer for mixture means, optional weight uncertainty
@@ -58,9 +58,7 @@ class MixtureMeansLayer(Layer):
                     for c in range(n_components)]
 
         if self.svi:
-            if seed == None:
-                seed = np.random.randint(1, 2147462579)
-            self._srng = np.random.RandomState(seed)
+            self.rng = np.random.RandomState(seed=seed)
             self.sWs = [self.add_param(sWs_init,
                                        (self.input_shape[1], self.n_dim),
                                        name='sW' + str(c), sp=True, wp=True)
@@ -87,7 +85,7 @@ class MixtureMeansLayer(Layer):
                     self.mbs)]
         else:
             uas = [
-                Variable(dtype(self._srng.normal(size=\
+                Variable(dtype(self.rng.normal(size=\
                     (inp.shape[0],
                      self.n_dim)))) for i in range(
                     self.n_components)]

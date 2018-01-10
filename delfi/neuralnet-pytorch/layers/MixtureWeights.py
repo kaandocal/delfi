@@ -11,9 +11,9 @@ class MixtureWeightsLayer(FullyConnectedLayer):
     def __init__(self, incoming, n_units, 
                  svi=True,
                  mWs_init=HeNormal(),
-                 mbs_init=Constant([0.]),
-                 sWs_init=Constant([-5.]),
-                 sbs_init=Constant([-5.]),
+                 mbs_init=Constant(0.),
+                 sWs_init=Constant(-5.),
+                 sbs_init=Constant(-5.),
                  actfun=F.softmax,
                  seed=None,
                  **kwargs):
@@ -45,4 +45,4 @@ class MixtureWeightsLayer(FullyConnectedLayer):
         if self.n_units > 1:
             return super().forward(inp, deterministic=deterministic, **kwargs)
         else:
-            return torch.ones((inp.shape[0], 1)).type(dtype)
+            return Variable(torch.ones((inp.shape[0], 1)).type(dtype))

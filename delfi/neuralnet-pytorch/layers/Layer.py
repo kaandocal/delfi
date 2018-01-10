@@ -58,7 +58,7 @@ class FlattenLayer(Layer):
         to_flatten = self.input_shape[self.outdim - 1:]
         self.output_shape = self.input_shape[:self.outdim - 1] + (np.prod(to_flatten),)
 
-    def forward(self, inp):
+    def forward(self, inp, deterministic=False):
         args = [ inp.shape[0] ] + [ int(x) for x in self.output_shape[1:]]
         ret = inp.view(*args)
         return ret
@@ -68,7 +68,7 @@ class ReshapeLayer(Layer):
         super().__init__(incoming, **kwargs)
         self.output_shape = output_shape
 
-    def forward(self, inp):
+    def forward(self, inp, deterministic=False):
         ret = inp.view(*self.output_shape)
         return ret
 
@@ -115,4 +115,4 @@ class Constant(Initialiser):
         self.val = val
 
     def sample(self, shape):
-        return torch.ones(*shape).type(dtype)
+        return torch.ones(*shape).fill_(self.val).type(dtype)

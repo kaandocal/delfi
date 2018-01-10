@@ -69,13 +69,13 @@ class NeuralNet(nn.Module):
             raise ValueError('n_inputs type not supported')
 
         # compose layers
-        self.layer = collections.OrderedDict()
+        self.layers = collections.OrderedDict()
 
         # learn replacement values
         if self.impute_missing:
-            self.preprocess = dl.ImputeMissingLayer()
+            self.layers['missing'] = dl.ImputeMissingLayer(self.n_inputs)
         else:
-            self.layer['missing'] = dl.ReplaceMissingLayer((None, *self.n_inputs))
+            self.layers['missing'] = dl.ReplaceMissingLayer(self.n_inputs)
         
         # recurrent neural net
         # expects shape (batch, sequence_length, num_inputs)
@@ -83,9 +83,9 @@ class NeuralNet(nn.Module):
             raise NotImplementedError
             if len(self.n_inputs) == 1:
                 rs = (-1, *self.n_inputs, 1)
-                self.layer['rnn_reshape'] = ReshapeLayer([None, *self.n_inputs], rs)
+                self.layers['rnn_reshape'] = ReshapeLayer(last(self.layers), rs)
 
-#             self.layer['rnn'] = ll.GRULayer(last(self.layer), n_rnn,
+#             self.layers['rnn'] = ll.GRULayer(last(self.layers), n_rnn,
 #                                             only_return_final=True)
 
         # convolutional layers
@@ -100,13 +100,13 @@ class NeuralNet(nn.Module):
             else:
                 rs = None
             if rs is not None:
-                self.layer['conv_reshape'] = ReshapeLayer([None, *self.n_inputs], rs)
+                self.layers['conv_reshape'] = ReshapeLayer(last(self.layers), rs)
 
 #             # add layers
 #             for l in range(len(n_filters)):
-#                 self.layer['conv_' + str(l + 1)] = Conv2DLayer(
+#                 self.layers['conv_' + str(l + 1)] = Conv2DLayer(
 #                     name='c' + str(l + 1),
-#                     incoming=last(self.layer),
+#                     incoming=last(self.layers),
 #                     num_filters=n_filters[l],
 #                     filter_size=3,
 #                     stride=(2, 2),
@@ -118,31 +118,31 @@ class NeuralNet(nn.Module):
 #                     flip_filters=True,
 #                     convolution=tt.nnet.conv2d)
 
-        self.layer['flatten'] = FlattenLayer(
-            incoming=(None, *self.n_inputs),
+        self.layers['flatten'] = FlattenLayer(
+            incoming=last(self.layers),
             outdim=2)
 
         # hidden layers
         for l in range(len(n_hiddens)):
-            self.layer['hidden_' + str(l + 1)] = dl.FullyConnectedLayer(
-                last(self.layer), n_units=n_hiddens[l],
+            self.layers['hidden_' + str(l + 1)] = dl.FullyConnectedLayer(
+                last(self.layers), n_units=n_hiddens[l],
                 svi=svi, name='h' + str(l + 1), seed=seed)
 
-        self.last_hidden = last(self.layer)
+        self.last_hidden = last(self.layers)
 
         # mixture layers
-        self.layer['mixture_weights'] = dl.MixtureWeightsLayer(
+        self.layers['mixture_weights'] = dl.MixtureWeightsLayer(
             self.last_hidden, n_units=n_components, actfun=torch.nn.functional.softmax, svi=svi,
             name='weights')
-        self.layer['mixture_means'] = dl.MixtureMeansLayer(
+        self.layers['mixture_means'] = dl.MixtureMeansLayer(
             self.last_hidden, n_components=n_components, n_dim=n_outputs, svi=svi,
             name='means')
-        self.layer['mixture_precisions'] = dl.MixturePrecisionsLayer(
+        self.layers['mixture_precisions'] = dl.MixturePrecisionsLayer(
             self.last_hidden, n_components=n_components, n_dim=n_outputs, svi=svi,
             name='precisions')
 
-        for ln in self.layer:
-            self.add_module(ln, self.layer[ln])
+        for ln in self.layers:
+            self.add_module(ln, self.layers[ln])
 
         self.lprobs = Variable(dtype([]))
         self.params = Variable(dtype([]))
@@ -150,9 +150,9 @@ class NeuralNet(nn.Module):
         self.iws = Variable(dtype([]))
         self.aps = {}
         
-        last_mog = [self.layer['mixture_weights'],
-                    self.layer['mixture_means'],
-                    self.layer['mixture_precisions']]
+        last_mog = [self.layers['mixture_weights'],
+                    self.layers['mixture_means'],
+                    self.layers['mixture_precisions']]
 
         self.aps = get_params(last_mog)
         self.mps = get_params(last_mog, mp=True) 
@@ -163,7 +163,7 @@ class NeuralNet(nn.Module):
         self.mps_bp = get_params(last_mog, mp=True, bp=True)
         self.sps_bp = get_params(last_mog, sp=True, bp=True)
 
-    def eval_comps(self, stats):
+    def eval_comps(self, stats, deterministic=False):
         """Evaluate the parameters of all mixture components at given inputs
 
         Parameters
@@ -182,14 +182,14 @@ class NeuralNet(nn.Module):
         else:
             x = stats
 
-        for l in self.layer:
-            x = self.layer[l](x)
-            if self.layer[l] == self.last_hidden:
+        for l in self.layers:
+            x = self.layers[l](x, deterministic=deterministic)
+            if self.layers[l] == self.last_hidden:
                 break
 
-        a = self.layer['mixture_weights'](x)
-        ms = self.layer['mixture_means'](x)
-        prec_data = self.layer['mixture_precisions'](x)
+        a = self.layers['mixture_weights'](x)
+        ms = self.layers['mixture_means'](x)
+        prec_data = self.layers['mixture_precisions'](x)
         Us, ldetUs = prec_data['Us'], prec_data['ldetUs']
     
         if type(stats) == np.ndarray:

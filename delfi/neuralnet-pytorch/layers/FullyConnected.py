@@ -8,8 +8,8 @@ dtype = torch.DoubleTensor
 
 class FullyConnectedLayer(Layer):
     def __init__(self, incoming, n_units, svi=False,
-                 mWs_init=HeNormal(), mbs_init=Constant([0.]),
-                 sWs_init=Constant([-5.]), sbs_init=Constant([-5.]),
+                 mWs_init=HeNormal(), mbs_init=Constant(0.),
+                 sWs_init=Constant(-5.), sbs_init=Constant(-5.),
                  actfun=F.tanh, seed=None, **kwargs):
         """Fully connected layer with optional weight uncertainty
 
@@ -38,9 +38,7 @@ class FullyConnectedLayer(Layer):
         self.output_shape = (self.input_shape[0], self.n_units)
 
         if self.svi:
-            if seed == None:
-                seed = np.random.randint(1, 2147462579)
-            self._srng = np.random.RandomState(seed)
+            self.rng = np.random.RandomState(seed=seed)
             self.sW = self.add_param(sWs_init,
                                      (self.input_shape[1], self.n_units),
                                      name='sW', sp=True, wp=True)
@@ -55,5 +53,5 @@ class FullyConnectedLayer(Layer):
             return self.actfun(ma)
         else:
             sa = torch.mm(inp**2, torch.exp(2 * self.sW)) + torch.exp(2 * self.sb)
-            ua = Variable(dtype(self._srng.normal(size=(inp.shape[0], self.n_units))))
+            ua = Variable(dtype(self.rng.normal(size=(inp.shape[0], self.n_units))))
             return self.actfun(torch.sqrt(sa) * ua + ma)
