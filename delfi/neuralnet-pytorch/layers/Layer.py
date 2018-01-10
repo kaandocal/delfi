@@ -22,8 +22,8 @@ class Layer(nn.Module):
 
     def add_param(self, spec, shape, name, **kwargs):
         shape = tuple([ int(x) for x in shape ])
-        init = spec(shape)
-        data = nn.Parameter(dtype(init))
+        init = spec(shape).type(dtype)
+        data = nn.Parameter(init)
         param = { 'data' : data,'init' : init, 'shape' : shape, 'name' : name, **kwargs }
         self.params[name] =param
         self.register_parameter(name, data)

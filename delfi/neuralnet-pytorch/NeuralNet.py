@@ -73,25 +73,25 @@ class NeuralNet(nn.Module):
 
         # learn replacement values
         if self.impute_missing:
-            self.layer['missing'] = dl.ImputeMissingLayer((None, *self.n_inputs), n_inputs=self.n_inputs)
+            self.preprocess = dl.ImputeMissingLayer()
         else:
             self.layer['missing'] = dl.ReplaceMissingLayer((None, *self.n_inputs))
-
         
         # recurrent neural net
         # expects shape (batch, sequence_length, num_inputs)
         if self.n_rnn > 0:
+            raise NotImplementedError
             if len(self.n_inputs) == 1:
                 rs = (-1, *self.n_inputs, 1)
-                self.layer['rnn_reshape'] = ReshapeLayer(last(self.layer), rs)
+                self.layer['rnn_reshape'] = ReshapeLayer([None, *self.n_inputs], rs)
 
-            raise NotImplementedError
 #             self.layer['rnn'] = ll.GRULayer(last(self.layer), n_rnn,
 #                                             only_return_final=True)
 
         # convolutional layers
         # expects shape (batch, num_input_channels, input_rows, input_columns)
         if len(self.n_filters) > 0:
+            raise NotImplementedError
             # reshape
             if len(self.n_inputs) == 1:
                 raise NotImplementedError
@@ -100,9 +100,8 @@ class NeuralNet(nn.Module):
             else:
                 rs = None
             if rs is not None:
-                self.layer['conv_reshape'] = ReshapeLayer(last(self.layer), rs)
+                self.layer['conv_reshape'] = ReshapeLayer([None, *self.n_inputs], rs)
 
-            raise NotImplementedError
 #             # add layers
 #             for l in range(len(n_filters)):
 #                 self.layer['conv_' + str(l + 1)] = Conv2DLayer(
@@ -120,7 +119,7 @@ class NeuralNet(nn.Module):
 #                     convolution=tt.nnet.conv2d)
 
         self.layer['flatten'] = FlattenLayer(
-            incoming=last(self.layer),
+            incoming=(None, *self.n_inputs),
             outdim=2)
 
         # hidden layers
@@ -178,8 +177,8 @@ class NeuralNet(nn.Module):
         -------
         mixing coefficients, means and scale matrices
         """
-        if type(stats) == np.ndarray:
-            x = Variable(dtype(stats.flatten().astype(dtype)).view(*stats.shape))
+        if type(stats) != Variable:
+            x = Variable(dtype(stats.flatten().astype(dtype)).view(*stats.shape), requires_grad=True)
         else:
             x = stats
 
@@ -241,11 +240,11 @@ class NeuralNet(nn.Module):
         if len(self.iws.size()) == 0:
             return Variable(dtype([0]))
 
-        return -torch.mm(self.iws, self.lprobs)
+        return -torch.dot(self.iws, self.lprobs)
 
     def forward(self, inp):
-        params = Variable(dtype(inp[0].astype('double')))
-        stats = Variable(dtype(inp[1].astype('double')))
+        params = Variable(dtype(inp[0].astype('double')),requires_grad=True)
+        stats = Variable(dtype(inp[1].astype('double')),requires_grad=True)
         iws = Variable(dtype(inp[2].astype('double')))
         lprobs = self.eval_lprobs(params, stats)
         ret = torch.dot(lprobs, iws)
