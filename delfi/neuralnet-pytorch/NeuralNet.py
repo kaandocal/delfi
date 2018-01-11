@@ -80,18 +80,15 @@ class NeuralNet(nn.Module):
         # recurrent neural net
         # expects shape (batch, sequence_length, num_inputs)
         if self.n_rnn > 0:
-            raise NotImplementedError
             if len(self.n_inputs) == 1:
                 rs = (-1, *self.n_inputs, 1)
                 self.layers['rnn_reshape'] = ReshapeLayer(last(self.layers), rs)
 
-#             self.layers['rnn'] = ll.GRULayer(last(self.layers), n_rnn,
-#                                             only_return_final=True)
+            self.layers['rnn'] = GRULayer(last(self.layers), n_rnn)
 
         # convolutional layers
         # expects shape (batch, num_input_channels, input_rows, input_columns)
         if len(self.n_filters) > 0:
-            raise NotImplementedError
             # reshape
             if len(self.n_inputs) == 1:
                 raise NotImplementedError
@@ -102,21 +99,15 @@ class NeuralNet(nn.Module):
             if rs is not None:
                 self.layers['conv_reshape'] = ReshapeLayer(last(self.layers), rs)
 
-#             # add layers
-#             for l in range(len(n_filters)):
-#                 self.layers['conv_' + str(l + 1)] = Conv2DLayer(
-#                     name='c' + str(l + 1),
-#                     incoming=last(self.layers),
-#                     num_filters=n_filters[l],
-#                     filter_size=3,
-#                     stride=(2, 2),
-#                     pad=0,
-#                     untie_biases=False,
-#                     W=lasagne.init.GlorotUniform(),
-#                     b=lasagne.init.Constant(0.),
-#                     nonlinearity=lnl.rectify,
-#                     flip_filters=True,
-#                     convolution=tt.nnet.conv2d)
+            for l in range(len(n_filters)):
+                self.layers['conv_' + str(l + 1)] = Conv2DLayer(
+                    incoming=last(self.layers),
+                    n_filters=n_filters[l],
+                    filter_size=3,
+                    stride=(2, 2),
+                    pad=0,
+                    untie_biases=False,
+                    flip_filters=True)
 
         self.layers['flatten'] = FlattenLayer(
             incoming=last(self.layers),

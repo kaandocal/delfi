@@ -83,13 +83,6 @@ class Trainer:
             self.trn_outputs_names += monitor_names
             self.trn_outputs_nodes += monitor_nodes
 
-        # function for single update
-#         self.make_update = theano.function(
-#             inputs=self.trn_inputs,
-#             outputs=self.trn_outputs_nodes,
-#             updates=self.updates
-#         )
-
         # initialize variables
         self.loss = float('inf')
 

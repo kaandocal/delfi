@@ -4,6 +4,8 @@ import torch
 #import theano.tensor as tt
 
 
+from torch.autograd import Variable
+
 def svi_kl_init(mps, sps):
     """Regularization for SVI such that parameters stay close to initial values
 
@@ -14,7 +16,7 @@ def svi_kl_init(mps, sps):
 
     Returns
     -------
-    L : theano variable
+    L : pytorch.Variable
         Regularizer
     imvs : dict
         Pointers to intermediate variables for monitoring during training
@@ -51,6 +53,54 @@ def svi_kl_init(mps, sps):
 
     return L, imvs
 
+def svi_kl_init(mps, sps):
+    """Regularization for SVI such that parameters stay close to initial values
+
+    Parameters
+    ----------
+    mps : list of means
+    sps : list of log stds
+
+    Returns
+    -------
+    L : pytorch.Variable
+        Regularizer
+    imvs : dict
+        Pointers to intermediate variables for monitoring during training
+    """
+    imvs = {}
+
+    n_params = sum([torch.numel(mp) for mp in mps])
+
+    mps_init = [Variable(mp.data.clone(), requires_grad=True) for mp in mps]
+    sps_init = [Variable(sp.data.clone(), requires_grad=True) for sp in sps]
+
+    logdet_Sigma1 = sum([torch.sum(2 * sp) for sp in sps])
+    logdet_Sigma2 = sum([torch.sum(2 * sp_init) for sp_init in sps_init])
+
+    tr_invSigma2_Sigma1 = sum([torch.sum(torch.exp(2 * (sp - sp_init)))
+                               for sp, sp_init in zip(sps, sps_init)])
+
+    quad_form = sum([torch.sum(((mp - mp_init)**2 / torch.exp(2 * sp_init)))
+                     for mp, mp_init, sp_init in zip(mps, mps_init, sps_init)])
+
+    L = 0.5 * (logdet_Sigma2 - logdet_Sigma1 -
+               n_params + tr_invSigma2_Sigma1 + quad_form)
+
+    # intermediate values that can be monitored
+    imvs['reg.logdetP'] = -logdet_Sigma1
+
+    for i in range(len(mps)):
+        imvs['reg.mds{}'.format(i)] = mps[i] - mps_init[i]
+
+    imvs['reg.quad_form'] = quad_form
+    imvs['reg.diff_logdet_Sigma'] = logdet_Sigma2 - logdet_Sigma1
+    imvs['reg.tr_invSigma2_Sigma1'] = tr_invSigma2_Sigma1 
+    imvs['reg.total_dkl'] = L 
+
+    print(L)
+
+    return L, imvs
 
 def svi_kl_zero_diag_gauss(mps_wp, sps_wp, mps_bp, sps_bp, a=1.0):
     """Regularization for SVI such that parameters stay close to zero
@@ -79,6 +129,8 @@ def svi_kl_zero_diag_gauss(mps_wp, sps_wp, mps_bp, sps_bp, a=1.0):
     imvs : dict
         Pointers to intermediate variables for monitoring during training
     """
+    raise NotImplementedError
+
     imvs = {}
 
     n_params = sum([mp.get_value().size for mp in mps_wp]) + \
@@ -128,7 +180,7 @@ def svi_kl_zero(mps, sps, wdecay):
 
     Returns
     -------
-    L : theano variable
+    L : torch.Variable
         Regularizer
     imvs : dict
         Pointers to intermediate variables for monitoring during training
