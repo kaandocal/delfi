@@ -1,25 +1,22 @@
-import lasagne
-import lasagne.init as linit
-import lasagne.layers as ll
-import lasagne.nonlinearities as lnl
-import theano
-import theano.tensor as tt
+import torch
+import torch.nn as nn
 
-from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
+from delfi.neuralnet.layers.Layer import *
 
-dtype = theano.config.floatX
+dtype = torch.DoubleTensor
 
 
-class MixtureMeansLayer(lasagne.layers.Layer):
+class MixtureMeansLayer(Layer):
     def __init__(self,
                  incoming,
                  n_components,
                  n_dim,
                  svi=True,
-                 mWs_init=linit.HeNormal(),
-                 mbs_init=linit.Constant([0.]),
-                 sWs_init=linit.Constant([-5.]),
-                 sbs_init=linit.Constant([-5.]),
+                 mWs_init=HeNormal(),
+                 mbs_init=Constant(0.),
+                 sWs_init=Constant(-5.),
+                 sbs_init=Constant(-5.),
+                 seed=None,
                  **kwargs):
         """Fully connected layer for mixture means, optional weight uncertainty
 
@@ -61,9 +58,7 @@ class MixtureMeansLayer(lasagne.layers.Layer):
                     for c in range(n_components)]
 
         if self.svi:
-            self._srng = RandomStreams(
-                lasagne.random.get_rng().randint(
-                    1, 2147462579))
+            self.rng = np.random.RandomState(seed=seed)
             self.sWs = [self.add_param(sWs_init,
                                        (self.input_shape[1], self.n_dim),
                                        name='sW' + str(c), sp=True, wp=True)
@@ -73,7 +68,7 @@ class MixtureMeansLayer(lasagne.layers.Layer):
                                        name='sb' + str(c), sp=True, bp=True)
                         for c in range(n_components)]
 
-    def get_output_for(self, input, deterministic=False, **kwargs):
+    def forward(self, inp, deterministic=False, **kwargs):
         """Compute outputs
 
         Returns
@@ -82,31 +77,27 @@ class MixtureMeansLayer(lasagne.layers.Layer):
         """
         if not self.svi or deterministic:
             return [
-                tt.dot(
-                    input,
+                torch.mm(
+                    inp,
                     mW) + mb for mW,
                 mb in zip(
                     self.mWs,
                     self.mbs)]
         else:
             uas = [
-                self._srng.normal(
-                    (input.shape[0],
-                     self.n_dim),
-                    dtype=dtype) for i in range(
+                Variable(dtype(self.rng.normal(size=\
+                    (inp.shape[0],
+                     self.n_dim)))) for i in range(
                     self.n_components)]
             mas = [
-                tt.dot(
-                    input,
+                torch.mm(
+                    inp,
                     mWm) +
                 mbm for mWm,
                 mbm in zip(
                     self.mWs,
                     self.mbs)]
-            sas = [tt.dot(input**2, tt.exp(2 * sW)) + tt.exp(2 * sb)
+            sas = [torch.mm(inp**2, torch.exp(2 * sW)) + torch.exp(2 * sb)
                    for sW, sb in zip(self.sWs, self.sbs)]
-            zas = [tt.sqrt(sa) * ua + ma for sa, ua, ma in zip(sas, uas, mas)]
+            zas = [torch.sqrt(sa) * ua + ma for sa, ua, ma in zip(sas, uas, mas)]
             return zas
-
-    def get_output_shape_for(self, input_shape):
-        raise NotImplementedError

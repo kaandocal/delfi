@@ -1,22 +1,24 @@
 import collections
 import delfi.distribution as dd
 import delfi.neuralnet.layers as dl
-import lasagne
-import lasagne.layers as ll
-import lasagne.nonlinearities as lnl
-import numpy as np
-import theano
-import theano.tensor as tt
 
+import torch
+import torch.nn as nn
+from torch.autograd import Variable
+
+import numpy as np
+import pdb
+
+from delfi.neuralnet.layers.Layer import Layer, FlattenLayer, ReshapeLayer
 from delfi.utils.odict import first, last, nth
 
-dtype = theano.config.floatX
+dtype = torch.DoubleTensor
 
-def MyLogSumExp(x, axis=None):
-    x_max = tt.max(x, axis=axis, keepdims=True)
-    return tt.log(tt.sum(tt.exp(x - x_max), axis=axis, keepdims=True)) + x_max
+def MyLogSumExp(x, axis):
+    x_max = torch.max(x, dim=axis, keepdim=True)[0]
+    return torch.log(torch.sum(torch.exp(x - x_max), dim=axis, keepdim=True)) + x_max
 
-class NeuralNet(object):
+class NeuralNet(nn.Module):
     def __init__(self, n_inputs, n_outputs, n_components=1, n_filters=[],
                  n_hiddens=[10, 10], n_rnn=None, impute_missing=True, seed=None,
                  svi=True):
@@ -30,28 +32,19 @@ class NeuralNet(object):
             Dimensionality of output
         n_components : int
             Number of components of the mixture density
-        n_filters : list of ints
-            Number of filters  per convolutional layer
         n_hiddens : list of ints
             Number of hidden units per fully connected layer
-        n_rnn : None or int
-            Number of RNN units
-        impute_missing : bool
-            If set to True, learns replacement value for NaNs, otherwise those
-            inputs are set to zero
         seed : int or None
             If provided, random number generator will be seeded
-        svi : bool
-            Whether to use SVI version or not
         """
+        super().__init__()
         self.impute_missing = impute_missing
         self.n_components = n_components
-        self.n_filters = n_filters
         self.n_hiddens = n_hiddens
         self.n_outputs = n_outputs
+        self.n_filters = n_filters
         self.svi = svi
 
-        self.iws = tt.vector('iws', dtype=dtype)
         if n_rnn is None:
             self.n_rnn = 0
         else:
@@ -64,7 +57,6 @@ class NeuralNet(object):
             self.rng = np.random.RandomState(seed=seed)
         else:
             self.rng = np.random.RandomState()
-        lasagne.random.set_rng(self.rng)
 
         # cast n_inputs to tuple
         if type(n_inputs) is int:
@@ -77,39 +69,22 @@ class NeuralNet(object):
             raise ValueError('n_inputs type not supported')
 
         # compose layers
-        self.layer = collections.OrderedDict()
-
-        # stats : input placeholder, (batch, *self.n_inputs)
-        if len(self.n_inputs)+1 == 2:
-            self.stats = tt.matrix('stats', dtype=dtype)
-        elif len(self.n_inputs)+1 == 3:
-            self.stats = tt.tensor3('stats', dtype=dtype)
-        elif len(self.n_inputs)+1 == 4:
-            self.stats = tt.tensor4('stats', dtype=dtype)
-        else:
-            raise NotImplementedError
-
-        # input layer
-        self.layer['input'] = ll.InputLayer(
-            (None, *self.n_inputs), input_var=self.stats)
+        self.layers = collections.OrderedDict()
 
         # learn replacement values
         if self.impute_missing:
-            self.layer['missing'] = dl.ImputeMissingLayer(last(self.layer),
-                                                          n_inputs=self.n_inputs)
+            self.layers['missing'] = dl.ImputeMissingLayer(self.n_inputs)
         else:
-            self.layer['missing'] = dl.ReplaceMissingLayer(last(self.layer),
-                                                           n_inputs=self.n_inputs)
-
+            self.layers['missing'] = dl.ReplaceMissingLayer(self.n_inputs)
+        
         # recurrent neural net
         # expects shape (batch, sequence_length, num_inputs)
         if self.n_rnn > 0:
             if len(self.n_inputs) == 1:
                 rs = (-1, *self.n_inputs, 1)
-                self.layer['rnn_reshape'] = ll.ReshapeLayer(last(self.layer), rs)
+                self.layers['rnn_reshape'] = ReshapeLayer(last(self.layers), rs)
 
-            self.layer['rnn'] = ll.GRULayer(last(self.layer), n_rnn,
-                                            only_return_final=True)
+            self.layers['rnn'] = GRULayer(last(self.layers), n_rnn)
 
         # convolutional layers
         # expects shape (batch, num_input_channels, input_rows, input_columns)
@@ -122,129 +97,64 @@ class NeuralNet(object):
             else:
                 rs = None
             if rs is not None:
-                self.layer['conv_reshape'] = ll.ReshapeLayer(last(self.layer), rs)
+                self.layers['conv_reshape'] = ReshapeLayer(last(self.layers), rs)
 
-            # add layers
             for l in range(len(n_filters)):
-                self.layer['conv_' + str(l + 1)] = ll.Conv2DLayer(
-                    name='c' + str(l + 1),
-                    incoming=last(self.layer),
-                    num_filters=n_filters[l],
+                self.layers['conv_' + str(l + 1)] = Conv2DLayer(
+                    incoming=last(self.layers),
+                    n_filters=n_filters[l],
                     filter_size=3,
                     stride=(2, 2),
                     pad=0,
                     untie_biases=False,
-                    W=lasagne.init.GlorotUniform(),
-                    b=lasagne.init.Constant(0.),
-                    nonlinearity=lnl.rectify,
-                    flip_filters=True,
-                    convolution=tt.nnet.conv2d)
+                    flip_filters=True)
 
-        # flatten
-        self.layer['flatten'] = ll.FlattenLayer(
-            incoming=last(self.layer),
+        self.layers['flatten'] = FlattenLayer(
+            incoming=last(self.layers),
             outdim=2)
 
         # hidden layers
         for l in range(len(n_hiddens)):
-            self.layer['hidden_' + str(l + 1)] = dl.FullyConnectedLayer(
-                last(self.layer), n_units=n_hiddens[l],
-                svi=svi, name='h' + str(l + 1))
+            self.layers['hidden_' + str(l + 1)] = dl.FullyConnectedLayer(
+                last(self.layers), n_units=n_hiddens[l],
+                svi=svi, name='h' + str(l + 1), seed=seed)
 
-        last_hidden = last(self.layer)
+        self.last_hidden = last(self.layers)
 
         # mixture layers
-        self.layer['mixture_weights'] = dl.MixtureWeightsLayer(
-            last_hidden, n_units=n_components, actfun=lnl.softmax, svi=svi,
+        self.layers['mixture_weights'] = dl.MixtureWeightsLayer(
+            self.last_hidden, n_units=n_components, actfun=torch.nn.functional.softmax, svi=svi,
             name='weights')
-        self.layer['mixture_means'] = dl.MixtureMeansLayer(
-            last_hidden, n_components=n_components, n_dim=n_outputs, svi=svi,
+        self.layers['mixture_means'] = dl.MixtureMeansLayer(
+            self.last_hidden, n_components=n_components, n_dim=n_outputs, svi=svi,
             name='means')
-        self.layer['mixture_precisions'] = dl.MixturePrecisionsLayer(
-            last_hidden, n_components=n_components, n_dim=n_outputs, svi=svi,
+        self.layers['mixture_precisions'] = dl.MixturePrecisionsLayer(
+            self.last_hidden, n_components=n_components, n_dim=n_outputs, svi=svi,
             name='precisions')
-        last_mog = [self.layer['mixture_weights'],
-                    self.layer['mixture_means'],
-                    self.layer['mixture_precisions']]
 
-        # output placeholder
-        self.params = tt.matrix('params', dtype=dtype)  # (batch, self.n_outputs)
+        for ln in self.layers:
+            self.add_module(ln, self.layers[ln])
 
-        # mixture parameters
-        # a : weights, matrix with shape (batch, n_components)
-        # ms : means, list of len n_components with (batch, n_dim, n_dim)
-        # Us : precision factors, n_components list with (batch, n_dim, n_dim)
-        # ldetUs : log determinants of precisions, n_comp list with (batch, )
-        self.a, self.ms, precision_out = ll.get_output(last_mog,
-                                                       deterministic=False)
+        self.lprobs = Variable(dtype([]))
+        self.params = Variable(dtype([]))
+        self.stats = Variable(dtype([]))
+        self.iws = Variable(dtype([]))
+        self.aps = {}
+        
+        last_mog = [self.layers['mixture_weights'],
+                    self.layers['mixture_means'],
+                    self.layers['mixture_precisions']]
 
-        self.Us = precision_out['Us']
-        self.ldetUs = precision_out['ldetUs']
+        self.aps = get_params(last_mog)
+        self.mps = get_params(last_mog, mp=True) 
+        self.sps = get_params(last_mog, sp=True)
 
-        self.comps = {
-            **{'a': self.a},
-            **{'m' + str(i): self.ms[i] for i in range(self.n_components)},
-            **{'U' + str(i): self.Us[i] for i in range(self.n_components)}}
+        self.mps_wp = get_params(last_mog, mp=True, wp=True)
+        self.sps_wp = get_params(last_mog, sp=True, wp=True)
+        self.mps_bp = get_params(last_mog, mp=True, bp=True)
+        self.sps_bp = get_params(last_mog, sp=True, bp=True)
 
-        # log probability of y given the mixture distribution
-        # lprobs_comps : log probs per component, list of len n_components with (batch, )
-        # probs : log probs of mixture, (batch, )
-
-        self.lprobs_comps = [-0.5 * tt.sum(tt.sum((self.params - m).dimshuffle(
-            [0, 'x', 1]) * U, axis=2)**2, axis=1) + ldetU
-            for m, U, ldetU in zip(self.ms, self.Us, self.ldetUs)]
-        self.lprobs = (MyLogSumExp(tt.stack(self.lprobs_comps, axis=1) + tt.log(self.a), axis=1) \
-                      - (0.5 * self.n_outputs * np.log(2 * np.pi))).squeeze()
-
-        # the quantities from above again, but with deterministic=True
-        # --- in the svi case, this will disable injection of randomness;
-        # the mean of weights is used instead
-        self.da, self.dms, dprecision_out = ll.get_output(last_mog,
-                                                          deterministic=True)
-        self.dUs = dprecision_out['Us']
-        self.dldetUs = dprecision_out['ldetUs']
-        self.dcomps = {
-            **{'a': self.da},
-            **{'m' + str(i): self.dms[i] for i in range(self.n_components)},
-            **{'U' + str(i): self.dUs[i] for i in range(self.n_components)}}
-        self.dlprobs_comps = [-0.5 * tt.sum(tt.sum((self.params - m).dimshuffle(
-            [0, 'x', 1]) * U, axis=2)**2, axis=1) + ldetU
-            for m, U, ldetU in zip(self.dms, self.dUs, self.dldetUs)]
-        self.dlprobs = (MyLogSumExp(tt.stack(self.dlprobs_comps, axis=1) + tt.log(self.da), axis=1) \
-                       - (0.5 * self.n_outputs * np.log(2 * np.pi))).squeeze()
-
-        # parameters of network
-        self.aps = ll.get_all_params(last_mog)  # all parameters
-        self.mps = ll.get_all_params(last_mog, mp=True)  # means
-        self.sps = ll.get_all_params(last_mog, sp=True)  # log stds
-
-        # weight and bias parameter sets as seperate lists
-        self.mps_wp = ll.get_all_params(last_mog, mp=True, wp=True)
-        self.sps_wp = ll.get_all_params(last_mog, sp=True, wp=True)
-        self.mps_bp = ll.get_all_params(last_mog, mp=True, bp=True)
-        self.sps_bp = ll.get_all_params(last_mog, sp=True, bp=True)
-
-        # theano functions
-        self.compile_funs()
-
-        self.iws = tt.vector('iws', dtype=dtype)
-
-    def compile_funs(self):
-        """Compiles theano functions"""
-        self._f_eval_comps = theano.function(
-            inputs=[self.stats],
-            outputs=self.comps)
-        self._f_eval_lprobs = theano.function(
-            inputs=[self.params, self.stats],
-            outputs=self.lprobs)
-        self._f_eval_dcomps = theano.function(
-            inputs=[self.stats],
-            outputs=self.dcomps)
-        self._f_eval_dlprobs = theano.function(
-            inputs=[self.params, self.stats],
-            outputs=self.dlprobs)
-
-    def eval_comps(self, stats, deterministic=True):
+    def eval_comps(self, stats, deterministic=False):
         """Evaluate the parameters of all mixture components at given inputs
 
         Parameters
@@ -258,12 +168,36 @@ class NeuralNet(object):
         -------
         mixing coefficients, means and scale matrices
         """
-        if deterministic:
-            return self._f_eval_dcomps(stats.astype(dtype))
+        if type(stats) != Variable:
+            x = Variable(dtype(stats.flatten().astype(dtype)).view(*stats.shape), requires_grad=True)
         else:
-            return self._f_eval_comps(stats.astype(dtype))
+            x = stats
 
-    def eval_lprobs(self, params, stats, deterministic=True):
+        for l in self.layers:
+            x = self.layers[l](x, deterministic=deterministic)
+            if self.layers[l] == self.last_hidden:
+                break
+
+        a = self.layers['mixture_weights'](x)
+        ms = self.layers['mixture_means'](x)
+        prec_data = self.layers['mixture_precisions'](x)
+        Us, ldetUs = prec_data['Us'], prec_data['ldetUs']
+    
+        if type(stats) == np.ndarray:
+            a = a.data.numpy()
+            ms = [ m.data.numpy() for m in ms ]
+            Us = [ U.data.numpy() for U in Us ]
+            ldetUs = [ ldetU.data.numpy() for ldetU in ldetUs ]
+
+        ret = {
+            **{'a': a},
+            **{'m' + str(i): ms[i] for i in range(self.n_components)},
+            **{'U' + str(i): Us[i] for i in range(self.n_components)},
+            **{'ldetU' + str(i): ldetUs[i] for i in range(self.n_components)}}
+
+        return ret
+
+    def eval_lprobs(self, params, stats):
         """Evaluate log probabilities for given input-output pairs.
 
         Parameters
@@ -277,10 +211,41 @@ class NeuralNet(object):
         -------
         log probabilities : log p(params|stats)
         """
-        if deterministic:
-            return self._f_eval_dlprobs(params.astype(dtype), stats.astype(dtype))
-        else:
-            return self._f_eval_lprobs(params.astype(dtype), stats.astype(dtype))
+        comps = self.eval_comps(stats)
+
+        a = comps['a']
+        ms = [ comps['m{}'.format(i)] for i in range(self.n_components) ]
+        Us = [ comps['U{}'.format(i)] for i in range(self.n_components) ]
+        ldetUs = [ comps['ldetU{}'.format(i)] for i in range(self.n_components) ]
+
+        lprobs_comps = [-0.5 * torch.sum(torch.sum((params - m).unsqueeze
+            (1) * U, dim=2)**2, dim=1) + ldetU
+            for m, U, ldetU in zip(ms, Us, ldetUs)]
+
+        lprobs = MyLogSumExp(torch.stack(lprobs_comps, dim=1) + torch.log(a) \
+                       - (0.5 * self.n_outputs * np.log(2 * np.pi)), axis=1).squeeze()
+
+        return lprobs
+
+    def get_loss(self):
+        if len(self.iws.size()) == 0:
+            return Variable(dtype([0]))
+
+        return -torch.dot(self.iws, self.lprobs)
+
+    def forward(self, inp):
+        params = Variable(dtype(inp[0].astype('double')),requires_grad=True)
+        stats = Variable(dtype(inp[1].astype('double')),requires_grad=True)
+        iws = Variable(dtype(inp[2].astype('double')))
+        lprobs = self.eval_lprobs(params, stats)
+        ret = torch.dot(lprobs, iws)
+
+        self.lprobs = lprobs
+        self.stats = stats
+        self.params= params
+        self.iws = iws
+
+        return ret
 
     def get_mog(self, stats, deterministic=True):
         """Return the conditional MoG at location x
@@ -294,7 +259,7 @@ class NeuralNet(object):
         """
         assert stats.shape[0] == 1, 'x.shape[0] needs to be 1'
 
-        comps = self.eval_comps(stats, deterministic)
+        comps = self.eval_comps(stats)
         a = comps['a'][0]
         ms = [comps['m' + str(i)][0] for i in range(self.n_components)]
         Us = [comps['U' + str(i)][0] for i in range(self.n_components)]
@@ -309,21 +274,6 @@ class NeuralNet(object):
             return self.rng.randint(0, 2**31)
 
     @property
-    def params_dict(self):
-        """Getter for params as dict"""
-        pdict = {}
-        for p in self.aps:
-            pdict[str(p)] = p.get_value()
-        return pdict
-
-    @params_dict.setter
-    def params_dict(self, pdict):
-        """Setter for params as dict"""
-        for p in self.aps:
-            if str(p) in pdict.keys():
-                p.set_value(pdict[str(p)])
-
-    @property
     def spec_dict(self):
         """Specs as dict"""
         return {'n_inputs': self.n_inputs,
@@ -335,5 +285,5 @@ class NeuralNet(object):
                 'seed': self.seed,
                 'svi': self.svi}
 
-    def get_loss(self):
-        return -tt.mean(self.iws * self.lprobs)
+def get_params(layers, **kwargs):
+    return [ x for l in layers for x in l.get_params(**kwargs) ]

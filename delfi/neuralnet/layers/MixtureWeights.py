@@ -1,20 +1,22 @@
-import lasagne
-import lasagne.init as linit
-import lasagne.layers as ll
-import lasagne.nonlinearities as lnl
-import theano
-import theano.tensor as tt
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from delfi.neuralnet.layers.FullyConnected import FullyConnectedLayer
+from delfi.neuralnet.layers.Layer import *
 
-dtype = theano.config.floatX
-
+dtype = torch.DoubleTensor
 
 class MixtureWeightsLayer(FullyConnectedLayer):
-    def __init__(self, incoming, n_units, svi=True,
-                 mW_init=linit.HeNormal(), mb_init=linit.Constant([0.]),
-                 sW_init=linit.Constant([-5.]), sb_init=linit.Constant([-5.]),
-                 actfun=lnl.softmax, **kwargs):
+    def __init__(self, incoming, n_units, 
+                 svi=True,
+                 mWs_init=HeNormal(),
+                 mbs_init=Constant(0.),
+                 sWs_init=Constant(-5.),
+                 sbs_init=Constant(-5.),
+                 actfun=F.softmax,
+                 seed=None,
+                 **kwargs):
         """Mixture weights layer with optional weight uncertainty
 
         If n_units > 1, this becomes a fully-connected layer. Else, no
@@ -29,22 +31,18 @@ class MixtureWeightsLayer(FullyConnectedLayer):
                 incoming,
                 n_units,
                 svi=svi,
-                mW_init=mW_init,
-                mb_init=mb_init,
-                sW_init=sW_init,
-                sb_init=sb_init,
+                mWs_init=mWs_init,
+                mbs_init=mbs_init,
+                sWs_init=sWs_init,
+                sbs_init=sbs_init,
                 actfun=actfun,
                 **kwargs)
         else:
-            # init of lasagne.layers.Layer
-            super(FullyConnectedLayer, self).__init__(incoming, **kwargs)
+            super().__init__(incoming, 1, actfun=actfun, **kwargs)
 
-    def get_output_for(self, input, deterministic=False, **kwargs):
+    def forward(self, inp, deterministic=False, **kwargs):
         """Returns matrix with shape (batch, n_units)"""
         if self.n_units > 1:
-            return super(MixtureWeightsLayer, self).get_output_for(
-                input,
-                deterministic=deterministic,
-                **kwargs)
+            return super().forward(inp, deterministic=deterministic, **kwargs)
         else:
-            return tt.ones((input.shape[0], self.n_units), dtype=dtype)
+            return Variable(torch.ones((inp.shape[0], 1)).type(dtype))

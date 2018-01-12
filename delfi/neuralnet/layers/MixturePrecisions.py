@@ -1,26 +1,24 @@
-import lasagne
-import lasagne.init as linit
-import lasagne.layers as ll
-import lasagne.nonlinearities as lnl
+import torch
+import torch.nn as nn
+from torch.autograd import Variable
+
 import numpy as np
-import theano
-import theano.tensor as tt
 
-from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
+from delfi.neuralnet.layers.Layer import *
 
-dtype = theano.config.floatX
+dtype = torch.DoubleTensor
 
-
-class MixturePrecisionsLayer(lasagne.layers.Layer):
+class MixturePrecisionsLayer(Layer):
     def __init__(self,
                  incoming,
                  n_components,
                  n_dim,
                  svi=True,
-                 mWs_init=linit.HeNormal(),
-                 mbs_init=linit.Constant([0.]),
-                 sWs_init=linit.Constant([-5.]),
-                 sbs_init=linit.Constant([-5.]),
+                 mWs_init=HeNormal(),
+                 mbs_init=Constant(0.),
+                 sWs_init=Constant(-5.),
+                 sbs_init=Constant(-5.),
+                 seed=None,
                  **kwargs):
         """Fully connected layer for mixture precisions, optional weight uncertainty
 
@@ -62,19 +60,17 @@ class MixturePrecisionsLayer(lasagne.layers.Layer):
                     for c in range(n_components)]
 
         if self.svi:
-            self._srng = RandomStreams(
-                lasagne.random.get_rng().randint(
-                    1, 2147462579))
+            self.rng = np.random.RandomState(seed=seed)
             self.sWs = [self.add_param(sWs_init,
-                                       (self.input_shape[1], self.n_dim**2),
+                                       (self.input_shape[1], self.n_dim ** 2),
                                        name='sW' + str(c), sp=True, wp=True)
                         for c in range(n_components)]
             self.sbs = [self.add_param(sbs_init,
-                                       (self.n_dim**2,),
+                                       (self.n_dim ** 2,),
                                        name='sb' + str(c), sp=True, bp=True)
                         for c in range(n_components)]
 
-    def get_output_for(self, input, deterministic=False, **kwargs):
+    def forward(self, inp, deterministic = False, **kwargs):
         """Compute outputs
 
         Returns
@@ -85,47 +81,42 @@ class MixturePrecisionsLayer(lasagne.layers.Layer):
             ldetUs : list of length n_components with (batch, n_dim, n_dim)
                 Log determinants of precisions
         """
-        triu_mask = np.triu(np.ones([self.n_dim, self.n_dim], dtype=dtype), 1)
-        diag_mask = np.eye(self.n_dim, dtype=dtype)
-        offdiag_mask = np.ones(self.n_dim, dtype=dtype) - \
-            np.eye(self.n_dim, dtype=dtype)
+        triu_mask = Variable(torch.triu(torch.ones(self.n_dim, self.n_dim).type(dtype), 1))
+        diag_mask = Variable(torch.eye(self.n_dim).type(dtype))
+        offdiag_mask = Variable(torch.ones(self.n_dim).type(dtype) - \
+            torch.eye(self.n_dim).type(dtype))
 
         if not self.svi or deterministic:
-            zas_reshaped = [tt.reshape(tt.dot(
-                input, mW) + mb, [-1, self.n_dim, self.n_dim]) for mW, mb in zip(self.mWs, self.mbs)]
+            zas_reshaped = [(torch.mm(
+                            inp, mW) + mb).view((-1, self.n_dim, self.n_dim)) for mW, mb in zip(self.mWs, self.mbs)]
         else:
             uas = [
-                self._srng.normal(
-                    (input.shape[0],
-                     self.n_dim**2),
-                    dtype=dtype) for i in range(
+                Variable(dtype(self.rng.normal(
+                    size=(inp.shape[0],
+                     self.n_dim**2)))) for i in range(
                     self.n_components)]
             mas = [
-                tt.dot(
-                    input,
+                torch.mm(
+                    inp,
                     mW) +
                 mb for mW,
                 mb in zip(
                     self.mWs,
                     self.mbs)]
-            sas = [tt.dot(input**2, tt.exp(2 * sW)) + tt.exp(2 * sb)
+            sas = [torch.mm(inp**2, torch.exp(2 * sW)) + torch.exp(2 * sb)
                    for sW, sb in zip(self.sWs, self.sbs)]
-            zas = [tt.sqrt(sa) * ua + ma for sa, ua, ma in zip(sas, uas, mas)]
+            zas = [torch.sqrt(sa) * ua + ma for sa, ua, ma in zip(sas, uas, mas)]
 
-            zas_reshaped = [tt.reshape(
-                za, [-1, self.n_dim, self.n_dim]) for za in zas]
+            zas_reshaped = [ za.view([-1, self.n_dim, self.n_dim]) for za in zas]
 
         Us = [
             triu_mask *
             za +
             diag_mask *
-            tt.exp(
+            torch.exp(
                 diag_mask *
                 za) for za in zas_reshaped]
-        ldetUs = [tt.sum(tt.sum(diag_mask * za, axis=2), axis=1)
+        ldetUs = [torch.sum(torch.sum(diag_mask * za, dim=2), dim=1)
                   for za in zas_reshaped]
 
         return {'Us': Us, 'ldetUs': ldetUs}
-
-    def get_output_shape_for(self, input_shape):
-        raise NotImplementedError

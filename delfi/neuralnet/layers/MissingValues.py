@@ -1,32 +1,52 @@
-import lasagne
-import lasagne.layers as ll
-import theano
-import theano.tensor as tt
+import torch
+import torch.autograd
+import torch.nn as nn
 
-dtype = theano.config.floatX
+import numpy as np
 
+from delfi.neuralnet.layers.Layer import *
 
-class ImputeMissingLayer(lasagne.layers.Layer):
-    def __init__(self, incoming, n_inputs, R=lasagne.init.Normal(0.01), **kwargs):
-        """Inputs that are NaN will be replaced by learned imputation value"""
-        super(ImputeMissingLayer, self).__init__(incoming, **kwargs)
-        self.R = self.add_param(R, (*n_inputs,), name='imputation_values')
+dtype = torch.DoubleTensor
 
-    def get_output_for(self, input, **kwargs):
-        return tt.cast(tt.switch(tt.isnan(input), self.R, input), dtype)
+class ImputeMissing(torch.autograd.Function):
+    def __init__(self, imputed_values):
+        self.imputed_values = imputed_values
 
-    def get_output_shape_for(self, input_shape):
-        return input_shape
+    def forward(self, inp):
+        ret = inp.clone()
+        self.save_for_backward(inp)
+        
+        for i in range(len(ret)):
+            r = ret[i]
+            r[r != r] = self.imputed_values[r != r] 
 
+        return ret
 
-class ReplaceMissingLayer(lasagne.layers.Layer):
-    def __init__(self, incoming, n_inputs, **kwargs):
+    def backward(self, grad_output):
+        inp, = self.saved_tensors
+        grad_input = grad_output.clone()
+        grad_input[inp != inp] = 0
+        return grad_input
+
+class ReplaceMissingLayer(Layer):
+    def __init__(self, incoming, n_inputs=None, **kwargs):
         """Inputs that are NaN will be replaced by zero through this layer"""
-        super(ReplaceMissingLayer, self).__init__(incoming, **kwargs)
-        self.Z = tt.zeros((*n_inputs,), dtype)
+        super().__init__(incoming, **kwargs)
+        self.output_shape = self.input_shape
+        self.imputation_values = torch.zeros(self.input_shape).type(dtype)
 
-    def get_output_for(self, input, **kwargs):
-        return tt.cast(tt.switch(tt.isnan(input), self.Z, input), dtype)
+    def forward(self, inp, **kwargs):
+        impute = ImputeMissing(self.imputation_values)
+        return impute(inp)
+        
+class ImputeMissingLayer(Layer):
+    def __init__(self, incoming, n_inputs=None, R=Normal(std=0.01), **kwargs):
+        """Inputs that are NaN will be replaced by zero through this layer"""
+        super().__init__(incoming, **kwargs)
+        self.output_shape = self.input_shape
+        self.imputation_values = self.add_param(R, self.input_shape, name='imputation_values')
 
-    def get_output_shape_for(self, input_shape):
-        return input_shape
+    def forward(self, inp, **kwargs):
+        impute = ImputeMissing(self.imputation_values.data)
+        return impute(inp)
+
