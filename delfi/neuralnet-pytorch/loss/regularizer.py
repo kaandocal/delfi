@@ -98,8 +98,6 @@ def svi_kl_init(mps, sps):
     imvs['reg.tr_invSigma2_Sigma1'] = tr_invSigma2_Sigma1 
     imvs['reg.total_dkl'] = L 
 
-    print(L)
-
     return L, imvs
 
 def svi_kl_zero_diag_gauss(mps_wp, sps_wp, mps_bp, sps_bp, a=1.0):

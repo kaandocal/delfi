@@ -147,7 +147,7 @@ class Uniform(Initialiser):
         ret.uniform_(self.lims[0], self.lims[1])
         return ret
 
-class GlorotUniform(Initialiser):
+class GlorotUniform(Glorot):
     def __init__(self, gain=1.0):
         super().__init__(initialiser=Uniform, gain=gain)
 
@@ -163,7 +163,7 @@ class Gate:
         self.actfun=actfun
 
 class GRULayer(Layer):
-    def __init__(self, incoming, n_units, resetgate=Gate(W_cell=None), updategate=Gate(W_cell=None), hidden_update=Gate(W_cell=None, actfun=F.tanh, hid_init=Constant(0), **kwargs):
+    def __init__(self, incoming, n_units, resetgate=Gate(W_cell=None), updategate=Gate(W_cell=None), hidden_update=Gate(W_cell=None), actfun=F.tanh, hid_init=Constant(0), **kwargs):
         super().__init__(incoming, **kwargs)
 
         self.n_units = n_units
@@ -292,7 +292,7 @@ class BaseConvLayer(Layer):
         return self.actfun(act)
 
 class Conv2DLayer(BaseConvLayer):
-    def __init__(self, incoming, n_filters, filter_size, stride=(1,1), pad=0, untie_biases=False, W=GlorotUniform(), b=Constant(0), actfun=F.rectify, flip_filtersFalse, convolution=torch.nn.conv2d, **kwargs):
+    def __init__(self, incoming, n_filters, filter_size, stride=(1,1), pad=0, untie_biases=False, W=GlorotUniform(), b=Constant(0), actfun=F.relu, flip_filters=False, convolution=F.conv2d, **kwargs):
         super().__init__(incoming=incoming, n_filters=n_filters, filter_size=filter_size, stride=stride, pad=pad, untie_biases=untie_biases, W=W, b=b, actfun=actfun, flip_filters=flip_filters, n=2, **kwargs)
         self.convolution = convoluton
 
