@@ -11,6 +11,7 @@ dtype = theano.config.floatX
 class Trainer:
     def __init__(self, network, loss, trn_data, trn_inputs,
                  step=lu.adam, lr=0.001, lr_decay=1.0, max_norm=0.1,
+                 es_thresh=None,
                  monitor=None, seed=None):
         """Construct and configure the trainer
 
@@ -88,6 +89,8 @@ class Trainer:
         # initialize variables
         self.loss = float('inf')
 
+        self.es_thresh = es_thresh
+
     def train(self,
               epochs=250,
               minibatch=50,
@@ -119,6 +122,8 @@ class Trainer:
 
         # initialize variables
         iter = 0
+
+        es_hist = 5
 
         # minibatch size
         minibatch = self.n_trn_data if minibatch is None else minibatch
@@ -175,6 +180,11 @@ class Trainer:
                         break
 
                     pbar.update(minibatch)
+
+                if self.es_thresh is not None and epoch > es_hist:
+                    loss_diffs = np.diff(trn_outputs['loss'][-es_hist - 1:])
+                    if not np.mean(loss_diffs) < -self.es_thresh:
+                        break
 
         # convert lists to arrays
         for name, value in trn_outputs.items():
