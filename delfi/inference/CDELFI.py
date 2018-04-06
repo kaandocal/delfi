@@ -12,7 +12,7 @@ class CDELFI(BaseInference):
     def __init__(self, generator, obs, prior_norm=False,
                  pilot_samples=100,
                  n_components=1, reg_lambda=0.01, seed=None, verbose=True,
-                 **kwargs):
+                 reinit_weights=False, **kwargs):
         """Conditional density estimation likelihood-free inference (CDE-LFI)
 
         Implementation of algorithms 1 and 2 of Papamakarios and Murray, 2016.
@@ -61,6 +61,9 @@ class CDELFI(BaseInference):
         self.n_components = n_components
         self.obs = obs
 
+        self.reinit_weights = reinit_weights
+        self.init_norm = None
+        self.init_fcv=0.8
 
         if np.any(np.isnan(self.obs)):
             raise ValueError("Observed data contains NaNs")
@@ -136,6 +139,14 @@ class CDELFI(BaseInference):
                 # posterior becomes new proposal prior
                 posterior = self.predict(self.obs)
                 self.generator.proposal = posterior.project_to_gaussian()
+
+            if self.reinit_weights:
+                print('re-initializing network weights')
+                self.reinit_network()                
+                if self.init_norm:
+                    print('standardizing network initialization')
+                    self.standardize_init(fcv = self.init_fcv)
+
 
             # number of training examples for this round
             if type(n_train) == list:

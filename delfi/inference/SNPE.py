@@ -115,7 +115,7 @@ class SNPE(BaseInference):
     def run(self, n_train=100, n_rounds=2, epochs=100, minibatch=50,
             round_cl=1, stop_on_nan=False, monitor=None, kernel_loss=None, 
             epochs_cbk=None, cbk_feature_layer=0, minibatch_cbk=None, 
-            **kwargs):
+            n_components=None, **kwargs):
         """Run algorithm
 
         Parameters
@@ -175,7 +175,22 @@ class SNPE(BaseInference):
 
                 self.generator.proposal = proposal
 
-            if self.round > 1 and self.reinit_weights:
+            if n_components is not None:
+                if type(n_components) == int:
+                    n_components_round = n_components
+                else:
+                    try:
+                        n_components_round = n_components[r]
+                    except IndexError:
+                        n_components_round = n_components[-1]
+
+                self.kwargs['n_components'] = n_components_round
+                reinit_weights = True
+
+            elif self.round > 1 and self.reinit_weights:
+                reinit_weights = True
+
+            if reinit_weights:
                 print('re-initializing network weights')
                 self.reinit_network()                
                 if self.init_norm:
