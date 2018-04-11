@@ -115,7 +115,7 @@ class SNPE(BaseInference):
     def run(self, n_train=100, n_rounds=2, epochs=100, minibatch=50,
             round_cl=1, stop_on_nan=False, monitor=None, kernel_loss=None, 
             epochs_cbk=None, cbk_feature_layer=0, minibatch_cbk=None, 
-            n_components=None, **kwargs):
+            n_ensemble=None, n_components=None, **kwargs):
         """Run algorithm
 
         Parameters
@@ -272,25 +272,51 @@ class SNPE(BaseInference):
             trn_inputs = [self.network.params, self.network.stats,
                           self.network.iws]
 
-            t = Trainer(self.network,
-                        self.loss(N=n_train_round, round_cl=round_cl),
-                        trn_data=trn_data, trn_inputs=trn_inputs,
-                        seed=self.gen_newseed(),
-                        monitor=self.monitor_dict_from_names(monitor),
-                        **kwargs)
-            logs.append(t.train(epochs=epochs_round, minibatch=minibatch,
-                                verbose=verbose, stop_on_nan=stop_on_nan))
+            if n_ensemble is None:
+                t = Trainer(self.network,
+                            self.loss(N=n_train_round, round_cl=round_cl),
+                            trn_data=trn_data, trn_inputs=trn_inputs,
+                            seed=self.gen_newseed(),
+                            monitor=self.monitor_dict_from_names(monitor),
+                            **kwargs)
+                logs.append(t.train(epochs=epochs_round, minibatch=minibatch,
+                                    verbose=verbose, stop_on_nan=stop_on_nan))
 
-            logs[-1]['cbkrnl'] = cbkrnl
-            logs[-1]['cbk_loss'] = cbl
+                logs[-1]['cbkrnl'] = cbkrnl
+                logs[-1]['cbk_loss'] = cbl
 
-            trn_datasets.append(trn_data)
+                trn_datasets.append(trn_data)
 
-            try:
                 posteriors.append(self.predict(self.obs))
-            except:
-                posteriors.append(None)
-                print('analytic correction for proposal seemingly failed!')
-                break
+            else:
+                logs_r = []
+                trn_data_r = []
+                posteriors_r = []
+
+                for i in range(n_ensemble):
+                    self.reinit_network()                
+                    if self.init_norm:
+                        print('standardizing network initialization')
+                        self.standardize_init(fcv = self.init_fcv)
+
+                    t = Trainer(self.network,
+                                self.loss(N=n_train_round, round_cl=round_cl),
+                                trn_data=trn_data, trn_inputs=trn_inputs,
+                                seed=self.gen_newseed(),
+                                monitor=self.monitor_dict_from_names(monitor),
+                                **kwargs)
+                    logs_r.append(t.train(epochs=epochs_round, minibatch=minibatch,
+                                        verbose=verbose, stop_on_nan=stop_on_nan))
+
+                    logs[-1]['cbkrnl'] = cbkrnl
+                    logs[-1]['cbk_loss'] = cbl
+
+                    trn_data_r.append(trn_data)
+
+                    posteriors_r.append(self.predict(self.obs))
+
+                logs.append(logs_r)
+                trn_data.append(trn_data_r)
+                posteriors.append(posteriors_r)
 
         return logs, trn_datasets, posteriors

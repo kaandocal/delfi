@@ -118,7 +118,7 @@ class MPGenerator(Default):
         if rem_i != n_samples:
             yield params[rem_i:]    
 
-    def gen(self, n_samples, n_reps=1, skip_feedback=False, prior_mixin=0, minibatch=50, keep_data=True, verbose=True):
+    def gen(self, n_samples, n_reps=1, skip_feedback=False, prior_mixin=0, verbose=True, **kwargs):
         """Draw parameters and run forward model
 
         Parameters
@@ -147,6 +147,9 @@ class MPGenerator(Default):
                                   prior_mixin=prior_mixin,
                                   verbose = verbose)
 
+        return self.run_model(params, verbose=verbose, **kwargs)
+
+    def run_model(self, params, minibatch=50, keep_data=True, verbose=False):
         # Run forward model for params (in batches)
         if not verbose:
             pbar = no_tqdm()
@@ -195,17 +198,18 @@ class MPGenerator(Default):
         # TODO: for n_reps > 1 duplicate params; reshape stats array
 
         # n_samples x n_reps x dim theta
-        params = np.array(final_params)
+        final_params = np.array(final_params)
 
         # n_samples x n_reps x dim summary stats
         stats = np.array(final_stats)
         stats = stats.squeeze(axis=1)
 
-        return params, stats
+        return final_params, stats
 
     def log(self, msg):
         if self.verbose:
             print("Parent: {}".format(msg))
+
     def __del__(self):
         self.log("Closing")
         for w, p in zip(self.workers, self.pipes):
