@@ -115,7 +115,7 @@ class SNPE(BaseInference):
     def run(self, n_train=100, n_rounds=2, epochs=100, minibatch=50,
             round_cl=1, stop_on_nan=False, monitor=None, kernel_loss=None, 
             epochs_cbk=None, cbk_feature_layer=0, minibatch_cbk=None, 
-            n_ensemble=None, n_components=None, **kwargs):
+            impute_proposal=None, reinit_weights=None, n_ensemble=None, n_components=None, **kwargs):
         """Run algorithm
 
         Parameters
@@ -160,8 +160,10 @@ class SNPE(BaseInference):
         for r in range(n_rounds):
             self.round += 1
 
+            if self.round == 1 and impute_proposal is not None:
+                self.generator.proposal = impute_proposal
             # if round > 1, set new proposal distribution before sampling
-            if self.round > 1:
+            elif self.round > 1:
                 # posterior becomes new proposal prior
                 proposal = self.predict(self.obs)  # see super
 
