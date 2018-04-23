@@ -123,7 +123,7 @@ def kernel_opt(iws, stats, obs, kernel_loss=None, step=lu.adam,
                max_norm=0.1, monitor=None, monitor_every=None, 
                stop_on_nan=False, verbose=False, seed=None):
 
-    assert kernel_loss in (None, 'x_kl', 'ess')
+    assert kernel_loss in (None, 'x_kl', 'ess', 'ess_local')
 
     dtype = theano.config.floatX
     input_var = T.matrix('inputs', dtype=dtype)
@@ -138,7 +138,10 @@ def kernel_opt(iws, stats, obs, kernel_loss=None, step=lu.adam,
     w_opt = prediction * target_var
     
     if kernel_loss == 'ess':
-        loss =  - T.sum(w_opt)**2 / T.sum(w_opt**2)
+        loss =  -T.sum(w_opt)**2 / T.sum(w_opt**2)
+    elif kernel_loss == 'ess_local':
+        w_renorm = w_opt / dx.shape[0]
+        loss = -T.sum(dx * renorm) / T.sum(dx * w_renorm **2)
     elif kernel_loss == 'x_kl':
         loss = T.log( T.mean(w_opt) ) - T.mean(T.log(prediction))        
     elif kernel_loss is None:
