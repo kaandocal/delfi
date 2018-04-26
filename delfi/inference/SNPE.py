@@ -4,6 +4,7 @@ import theano.tensor as tt
 
 from delfi.inference.BaseInference import BaseInference
 from delfi.neuralnet.Trainer import Trainer
+from delfi.neuralnet.Trainer_new import Trainer as Trainer_new
 from delfi.neuralnet.loss.regularizer import svi_kl_init, svi_kl_zero
 from delfi.kernel.Kernel_learning import kernel_opt
 
@@ -15,6 +16,7 @@ dtype = theano.config.floatX
 class SNPE(BaseInference):
     def __init__(self, generator, obs, prior_norm=False, init_norm=None,
                  pilot_samples=100, convert_to_T=3, 
+                 trainer_new=False,
                  reg_lambda=0.01, seed=None, verbose=True,
                  reinit_weights=False, **kwargs):
         """Sequential neural posterior estimation (SNPE)
@@ -60,6 +62,7 @@ class SNPE(BaseInference):
                          pilot_samples=pilot_samples, seed=seed,
                          verbose=verbose, **kwargs)
         self.obs = obs
+        self.trainer_new = trainer_new
 
         # optional: z-transform output for obs (also re-centres x onto obs!)
         self.init_norm = init_norm
@@ -157,6 +160,7 @@ class SNPE(BaseInference):
 
         minibatch_cbk = minibatch if minibatch_cbk is None else minibatch_cbk
 
+        mytrainer = Trainer_new if self.trainer_new else Trainer
         for r in range(n_rounds):
             self.round += 1
 
@@ -275,7 +279,7 @@ class SNPE(BaseInference):
                           self.network.iws]
 
             if n_ensemble is None:
-                t = Trainer(self.network,
+                t = mytrainer(self.network,
                             self.loss(N=n_train_round, round_cl=round_cl),
                             trn_data=trn_data, trn_inputs=trn_inputs,
                             seed=self.gen_newseed(),
@@ -301,7 +305,7 @@ class SNPE(BaseInference):
                         print('standardizing network initialization')
                         self.standardize_init(fcv = self.init_fcv)
 
-                    t = Trainer(self.network,
+                    t = mytrainer(self.network,
                                 self.loss(N=n_train_round, round_cl=round_cl),
                                 trn_data=trn_data, trn_inputs=trn_inputs,
                                 seed=self.gen_newseed(),
