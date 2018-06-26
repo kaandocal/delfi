@@ -17,7 +17,8 @@ class MoG(BaseMixture):
             Us=None,
             Ss=None,
             xs=None,
-            seed=None):
+            seed=None,
+            prune=0.01):
         """Mixture of Gaussians
 
         Creates a MoG with a valid combination of parameters or an already given
@@ -43,7 +44,15 @@ class MoG(BaseMixture):
         self.__div__ = self.__truediv__
         self.__idiv__ = self.__itruediv__
 
+        a = np.asarray(a)
+        idcs = a >= prune
+        a = a[idcs]
+
+        assert len(a) > 0, "All components pruned"
+
         if ms is not None:
+            ms = np.asarray(ms)[idcs]
+
             super().__init__(
                 a=np.asarray(a),
                 ncomp=len(ms),
@@ -51,18 +60,21 @@ class MoG(BaseMixture):
                 seed=seed)
 
             if Ps is not None:
+                Ps = np.asarray(Ps)[idcs]
                 self.xs = [
                     Gaussian(
                         m=m, P=P, seed=self.gen_newseed()) for m, P in zip(
                         ms, Ps)]
 
             elif Us is not None:
+                Us = np.asarray(Us)[idcs]
                 self.xs = [
                     Gaussian(
                         m=m, U=U, seed=self.gen_newseed()) for m, U in zip(
                         ms, Us)]
 
             elif Ss is not None:
+                Ss = np.asarray(Ss)[idcs]
                 self.xs = [
                     Gaussian(
                         m=m, S=S, seed=self.gen_newseed()) for m, S in zip(
@@ -72,6 +84,8 @@ class MoG(BaseMixture):
                 raise ValueError('Precision information missing')
 
         elif xs is not None:
+            xs = [ x for i, x in enumerate(xs) if idcs[i] ] 
+
             super().__init__(
                 a=np.asarray(a),
                 ncomp=len(xs),

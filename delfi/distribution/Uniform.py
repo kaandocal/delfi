@@ -40,13 +40,16 @@ class Uniform(BaseDistribution):
         if ii is None:
             ii = np.arange(self.ndim)
 
-        N = np.atleast_2d(x).shape[0]
+        x = np.asarray(x)
+        if len(ii) == 1:
+            if x.ndim == 1:
+                x = x[...,np.newaxis]
 
         p = 1/np.prod(self.upper[ii] - self.lower[ii])
-        p = p*np.ones((N,))  # broadcasting
+        p = p*np.ones(x.shape[:-1])  # broadcasting
         
         # truncation of density
-        ind = (x > self.lower) & (x < self.upper)
+        ind = (x > self.lower[ii]) & (x < self.upper[ii])
         p[np.prod(ind,axis=1)==0] = 0
 
         if log:
