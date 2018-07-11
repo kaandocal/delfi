@@ -66,9 +66,7 @@ class Worker(mp.Process):
             # calculate summary statistics
             sum_stats = self.summary.calc(datum)  # n_reps x dim stats
 
-            # check validity
             ret_stats.append(sum_stats)
-            # if sum stats is accepted, accept the param as well
             ret_params.append(param)
             ret_sources.append(source)
 
@@ -151,9 +149,9 @@ class MPGenerator(Default):
                                            prior_mixin=prior_mixin,
                                            verbose = verbose)
 
-        return self.run_model(params, sources, verbose=verbose, **kwargs)
+        return self.run_model(params, sources, skip_feedback=skip_feedback, verbose=verbose, **kwargs)
 
-    def run_model(self, params, sources, minibatch=50, keep_data=True, verbose=False):
+    def run_model(self, params, sources, minibatch=50, skip_feedback=False, keep_data=True, verbose=False):
         # Run forward model for params (in batches)
         if not verbose:
             pbar = no_tqdm()
@@ -193,7 +191,7 @@ class MPGenerator(Default):
                         pbar.update(msg)
                     elif type(msg) == tuple:
                         self.log("Received results")
-                        stats, params, sources = msg 
+                        stats, params, sources = self.filter_data(*msg, skip_feedback=skip_feedback)
                         final_stats += stats
                         final_params += params
                         final_sources += sources
@@ -212,6 +210,27 @@ class MPGenerator(Default):
         stats = stats.squeeze(axis=1)
 
         return params, stats, sources
+
+    def filter_data(self, stats, params, sources, skip_feedback=False):
+        if skip_feedback == True:
+            return stats, params, sources
+
+        ret_stats = []
+        ret_params = []
+        ret_sources = []
+
+        for stat, param, source in zip(stats, params, sources):
+            response = self._feedback_summary_stats(stat)
+            if response == 'accept':
+                ret_stats.append(stat)
+                ret_stats.append(params)
+                ret_stats.append(sources)
+            elif response == 'discard':
+                continue
+            else:
+                raise ValueError('response not supported')
+        
+        return ret_stats, ret_params, ret_sources
 
     def log(self, msg):
         if self.verbose:
