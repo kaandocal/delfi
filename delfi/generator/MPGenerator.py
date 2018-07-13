@@ -30,7 +30,6 @@ class Worker(mp.Process):
             except EOFError:
                 self.log("Leaving")
                 break
-            
             if len(params_batch) == 0:
                 self.log("Skipping")
                 self.conn.send(([], []))
@@ -95,9 +94,12 @@ class MPGenerator(Default):
         """
         super().__init__(model=None, prior=prior, summary=summary, seed=None)
         self.verbose = verbose
-        pipes = [ mp.Pipe(duplex=True) for m in models ]
+        self.models = models
+
+    def start_workers(self):
+        pipes = [ mp.Pipe(duplex=True) for m in self.models ]
         self.queue = mp.Queue()
-        self.workers = [ Worker(i, self.queue, pipes[i][1], models[i], summary, seed=self.rng.randint(low=0,high=2**31), verbose=verbose) for i in range(len(models)) ]
+        self.workers = [ Worker(i, self.queue, pipes[i][1], sellf.models[i], self.summary, seed=self.rng.randint(low=0,high=2**31), verbose=verbose) for i in range(len(self.models)) ]
         self.pipes = [ p[0] for p in pipes ]
 
         self.log("Starting workers")
@@ -105,6 +107,20 @@ class MPGenerator(Default):
             w.start()
 
         self.log("Done")
+
+    def stop_workers(self):
+        self.log("Closing")
+        for w, p in zip(self.workers, self.pipes):
+            self.log("Closing pipe")
+            p.close()
+
+        for w in self.workers:
+            self.log("Joining process")
+            w.join(timeout=1)
+            w.terminate()
+
+        self.workers = None
+        self.pipes = None
 
     def iterate_minibatches(self, params, minibatch=50):
         n_samples = len(params)
@@ -158,6 +174,7 @@ class MPGenerator(Default):
                 desc += verbose
             pbar.set_description(desc)
 
+        self.start_workers()
         final_params = []
         final_stats = []  # list of summary stats
         minibatches = self.iterate_minibatches(params, minibatch)
@@ -192,6 +209,8 @@ class MPGenerator(Default):
                         n_remaining -= 1
                     else:
                         self.log("Warning: Received unknown message of type {}".format(type(msg)))
+
+        self.stop_workers()
 
         # TODO: for n_reps > 1 duplicate params; reshape stats array
 
@@ -228,12 +247,4 @@ class MPGenerator(Default):
             print("Parent: {}".format(msg))
 
     def __del__(self):
-        self.log("Closing")
-        for w, p in zip(self.workers, self.pipes):
-            self.log("Closing pipe")
-            p.close()
-
-        for w in self.workers:
-            self.log("Joining process")
-            w.join(timeout=1)
-            w.terminate()
+        self.stop_workers()
