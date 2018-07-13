@@ -26,7 +26,7 @@ class Worker(mp.Process):
         while True:
             try:
                 self.log("Listening")
-                params_batch, sources_batch = self.conn.recv()
+                params_batch = self.conn.recv()
             except EOFError:
                 self.log("Leaving")
                 break
@@ -40,37 +40,33 @@ class Worker(mp.Process):
             self.log("Received data of size {}".format(len(params_batch)))
             result = self.model.gen(params_batch, pbar=self)
 
-            stats, params, sources = self.process_batch(params_batch, sources_batch, result)
+            stats, params = self.process_batch(params_batch, result)
 
             self.log("Sending data")
-            self.queue.put((stats, params, sources))
+            self.queue.put((stats, params))
             self.log("Done")
 
-    def process_batch(self, params_batch, sources_batch, result):
+    def process_batch(self, params_batch, result):
         ret_stats = []
         ret_params = []
-        ret_sources = []
 
         # for every datum in data, check validity
         params_data_valid = []  # list of params with valid data
-        sources_data_valid = []
         data_valid = []  # list of lists containing n_reps dicts with data
 
-        for param, source, datum in zip(params_batch, sources_batch, result):
+        for param, datum in zip(params_batch, result):
             data_valid.append(datum)
             params_data_valid.append(param)
-            sources_data_valid.append(source)
 
         # for every data in data, calculate summary stats
-        for param, source, datum in zip(params_data_valid, sources_data_valid, data_valid):
+        for param, datum in zip(params_data_valid, data_valid):
             # calculate summary statistics
             sum_stats = self.summary.calc(datum)  # n_reps x dim stats
 
             ret_stats.append(sum_stats)
             ret_params.append(param)
-            ret_sources.append(source)
 
-        return ret_stats, ret_params, ret_sources
+        return ret_stats, ret_params
     
     def log(self, msg):
         if self.verbose:
@@ -110,15 +106,15 @@ class MPGenerator(Default):
 
         self.log("Done")
 
-    def iterate_minibatches(self, params, sources, minibatch=50):
+    def iterate_minibatches(self, params, minibatch=50):
         n_samples = len(params)
 
         for i in range(0, n_samples - minibatch+1, minibatch):
-            yield params[i:i + minibatch], sources[i:i + minibatch]
+            yield params[i:i + minibatch]
 
         rem_i = n_samples - (n_samples % minibatch)
         if rem_i != n_samples:
-            yield params[rem_i:], sources[rem_i:]
+            yield params[rem_i:]
 
     def gen(self, n_samples, n_reps=1, skip_feedback=False, prior_mixin=0, verbose=True, **kwargs):
         """Draw parameters and run forward model
@@ -144,14 +140,14 @@ class MPGenerator(Default):
         """
         assert n_reps == 1, 'n_reps > 1 is not yet supported'
 
-        params, sources = self.draw_params(n_samples=n_samples,
-                                           skip_feedback=skip_feedback, 
-                                           prior_mixin=prior_mixin,
-                                           verbose = verbose)
+        params = self.draw_params(n_samples=n_samples,
+                                  skip_feedback=skip_feedback, 
+                                  prior_mixin=prior_mixin,
+                                  verbose = verbose)
 
-        return self.run_model(params, sources, skip_feedback=skip_feedback, verbose=verbose, **kwargs)
+        return self.run_model(params, skip_feedback=skip_feedback, verbose=verbose, **kwargs)
 
-    def run_model(self, params, sources, minibatch=50, skip_feedback=False, keep_data=True, verbose=False):
+    def run_model(self, params, minibatch=50, skip_feedback=False, keep_data=True, verbose=False):
         # Run forward model for params (in batches)
         if not verbose:
             pbar = no_tqdm()
@@ -163,23 +159,22 @@ class MPGenerator(Default):
             pbar.set_description(desc)
 
         final_params = []
-        final_sources = []
         final_stats = []  # list of summary stats
-        minibatches = self.iterate_minibatches(params, sources, minibatch)
+        minibatches = self.iterate_minibatches(params, minibatch)
         done = False
         with pbar:
             while not done:
                 active_list = []
                 for w, p in zip(self.workers, self.pipes):
                     try:
-                        params_batch, sources_batch = next(minibatches)
+                        params_batch = next(minibatches)
                     except StopIteration:
                         done = True
                         break
 
                     active_list.append((w,p))
                     self.log("Dispatching to worker (len = {})".format(len(params_batch)))
-                    p.send((params_batch, sources_batch))
+                    p.send(params_batch)
                     self.log("Done")
 
                 n_remaining = len(active_list)
@@ -191,10 +186,9 @@ class MPGenerator(Default):
                         pbar.update(msg)
                     elif type(msg) == tuple:
                         self.log("Received results")
-                        stats, params, sources = self.filter_data(*msg, skip_feedback=skip_feedback)
+                        stats, params = self.filter_data(*msg, skip_feedback=skip_feedback)
                         final_stats += stats
                         final_params += params
-                        final_sources += sources
                         n_remaining -= 1
                     else:
                         self.log("Warning: Received unknown message of type {}".format(type(msg)))
@@ -203,34 +197,31 @@ class MPGenerator(Default):
 
         # n_samples x n_reps x dim theta
         params = np.array(final_params)
-        sources = np.array(final_sources)
 
         # n_samples x n_reps x dim summary stats
         stats = np.array(final_stats)
         stats = stats.squeeze(axis=1)
 
-        return params, stats, sources
+        return params, stats
 
-    def filter_data(self, stats, params, sources, skip_feedback=False):
+    def filter_data(self, stats, params, skip_feedback=False):
         if skip_feedback == True:
-            return stats, params, sources
+            return stats, params
 
         ret_stats = []
         ret_params = []
-        ret_sources = []
 
-        for stat, param, source in zip(stats, params, sources):
+        for stat, param in zip(stats, params):
             response = self._feedback_summary_stats(stat)
             if response == 'accept':
                 ret_stats.append(stat)
-                ret_stats.append(params)
-                ret_stats.append(sources)
+                ret_params.append(params)
             elif response == 'discard':
                 continue
             else:
                 raise ValueError('response not supported')
         
-        return ret_stats, ret_params, ret_sources
+        return ret_stats, ret_params
 
     def log(self, msg):
         if self.verbose:
