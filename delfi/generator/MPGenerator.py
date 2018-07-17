@@ -99,7 +99,7 @@ class MPGenerator(Default):
     def start_workers(self):
         pipes = [ mp.Pipe(duplex=True) for m in self.models ]
         self.queue = mp.Queue()
-        self.workers = [ Worker(i, self.queue, pipes[i][1], sellf.models[i], self.summary, seed=self.rng.randint(low=0,high=2**31), verbose=verbose) for i in range(len(self.models)) ]
+        self.workers = [ Worker(i, self.queue, pipes[i][1], self.models[i], self.summary, seed=self.rng.randint(low=0,high=2**31), verbose=self.verbose) for i in range(len(self.models)) ]
         self.pipes = [ p[0] for p in pipes ]
 
         self.log("Starting workers")
@@ -234,7 +234,7 @@ class MPGenerator(Default):
             response = self._feedback_summary_stats(stat)
             if response == 'accept':
                 ret_stats.append(stat)
-                ret_params.append(params)
+                ret_params.append(param)
             elif response == 'discard':
                 continue
             else:
