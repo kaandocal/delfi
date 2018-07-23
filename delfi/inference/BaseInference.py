@@ -54,7 +54,7 @@ class BaseInference(metaclass=ABCMetaDoc):
         self.reinit_weights = reinit_weights
 
         # generate a sample to get input and output dimensions
-        params, stats = generator.gen(1, skip_feedback=True, verbose=False)
+        params, stats, sources = generator.gen(1, skip_feedback=True, verbose=False)
         kwargs.update({'n_inputs': stats.shape[1:],
                        'n_outputs': params.shape[1],
                        'seed': self.gen_newseed()})
@@ -146,9 +146,6 @@ class BaseInference(metaclass=ABCMetaDoc):
         """
 
         # avoiding CDELFI.predict() attempt to analytically correct for proposal
-        print('obs', self.obs.shape)
-        print('mean', self.stats_mean.shape)
-        print('std', self.stats_std.shape)
         obz = (self.obs - self.stats_mean) / self.stats_std
         posterior = self.network.get_mog(obz.reshape(self.obs.shape), deterministic=True)
         mog =  posterior.ztrans_inv(self.params_mean, self.params_std)
@@ -249,7 +246,7 @@ class BaseInference(metaclass=ABCMetaDoc):
             If None is passed, will default to self.verbose
         """
         verbose = self.verbose if verbose is None else verbose
-        params, stats = self.generator.gen(n_samples, prior_mixin=prior_mixin, verbose=verbose)
+        params, stats, sources = self.generator.gen(n_samples, prior_mixin=prior_mixin, verbose=verbose)
 
         # z-transform params and stats
         params = (params - self.params_mean) / self.params_std
@@ -269,7 +266,7 @@ class BaseInference(metaclass=ABCMetaDoc):
         """
 
         verbose = '(pilot run) ' if self.verbose else False
-        params, stats = self.generator.gen(n_samples, verbose=verbose)
+        params, stats, sources = self.generator.gen(n_samples, verbose=verbose)
         self.stats_mean = np.nanmean(stats, axis=0)
         self.stats_std = np.nanstd(stats, axis=0)
 

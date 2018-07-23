@@ -92,7 +92,7 @@ class MPGenerator(Default):
             samples given parameters drawn from proposal distribution rather
             than samples drawn from prior when `gen` is called.
         """
-        super().__init__(model=None, prior=prior, summary=summary, seed=None)
+        super().__init__(model=None, prior=prior, summary=summary, seed=seed)
         self.verbose = verbose
         self.models = models
 
@@ -109,6 +109,9 @@ class MPGenerator(Default):
         self.log("Done")
 
     def stop_workers(self):
+        if self.workers is None:
+            return
+
         self.log("Closing")
         for w, p in zip(self.workers, self.pipes):
             self.log("Closing pipe")
@@ -119,8 +122,11 @@ class MPGenerator(Default):
             w.join(timeout=1)
             w.terminate()
 
+        self.queue.close()
+
         self.workers = None
         self.pipes = None
+        self.queue = None
 
     def iterate_minibatches(self, params, minibatch=50):
         n_samples = len(params)
