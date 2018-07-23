@@ -19,7 +19,7 @@ def MyLogSumExp(x, axis=None):
 class NeuralNet(object):
     def __init__(self, n_inputs, n_outputs, n_components=1, n_filters=[],
                  n_hiddens=[10, 10], n_rnn=None, impute_missing=True, seed=None,
-                 svi=True):
+                 batch_norm=False, svi=True):
         """Initialize a mixture density network with custom layers
 
         Parameters
@@ -50,6 +50,7 @@ class NeuralNet(object):
         self.n_hiddens = n_hiddens
         self.n_outputs = n_outputs
         self.svi = svi
+        self.batch_norm = batch_norm
 
         self.iws = tt.vector('iws', dtype=dtype)
         if n_rnn is None:
@@ -145,11 +146,24 @@ class NeuralNet(object):
             incoming=last(self.layer),
             outdim=2)
 
-        # hidden layers
-        for l in range(len(n_hiddens)):
-            self.layer['hidden_' + str(l + 1)] = dl.FullyConnectedLayer(
-                last(self.layer), n_units=n_hiddens[l],
-                svi=svi, name='h' + str(l + 1))
+
+        if self.batch_norm:
+            # hidden layers
+            for l in range(len(n_hiddens) - 1):
+                self.layer['hidden_' + str(l + 1)] = ll.batch_norm(dl.FullyConnectedLayer(
+                    last(self.layer), n_units=n_hiddens[l],
+                    svi=svi, name='h' + str(l + 1)))
+
+            self.layer['hidden_' + str(len(n_hiddens))] = dl.FullyConnectedLayer(
+                last(self.layer), n_units=n_hiddens[-1],
+                svi=svi, name='h' + str(len(n_hiddens)))
+
+        else:
+            for l in range(len(n_hiddens)):
+                self.layer['hidden_' + str(l + 1)] = dl.FullyConnectedLayer(
+                    last(self.layer), n_units=n_hiddens[l],
+                    svi=svi, name='h' + str(l + 1))
+
 
         last_hidden = last(self.layer)
 
@@ -214,15 +228,15 @@ class NeuralNet(object):
                        - (0.5 * self.n_outputs * np.log(2 * np.pi))).squeeze()
 
         # parameters of network
-        self.aps = ll.get_all_params(last_mog)  # all parameters
-        self.mps = ll.get_all_params(last_mog, mp=True)  # means
-        self.sps = ll.get_all_params(last_mog, sp=True)  # log stds
+        self.aps = ll.get_all_params(last_mog, trainable=True)  # all parameters
+        self.mps = ll.get_all_params(last_mog, mp=True, trainable=True)  # means
+        self.sps = ll.get_all_params(last_mog, sp=True, trainable=True)  # log stds
 
         # weight and bias parameter sets as seperate lists
-        self.mps_wp = ll.get_all_params(last_mog, mp=True, wp=True)
-        self.sps_wp = ll.get_all_params(last_mog, sp=True, wp=True)
-        self.mps_bp = ll.get_all_params(last_mog, mp=True, bp=True)
-        self.sps_bp = ll.get_all_params(last_mog, sp=True, bp=True)
+        self.mps_wp = ll.get_all_params(last_mog, mp=True, wp=True, trainable=True)
+        self.sps_wp = ll.get_all_params(last_mog, sp=True, wp=True, trainable=True)
+        self.mps_bp = ll.get_all_params(last_mog, mp=True, bp=True, trainable=True)
+        self.sps_bp = ll.get_all_params(last_mog, sp=True, bp=True, trainable=True)
 
         # theano functions
         self.compile_funs()
