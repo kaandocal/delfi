@@ -47,6 +47,7 @@ class MoG(BaseMixture):
         a = np.asarray(a)
         idcs = a >= prune
         a = a[idcs]
+        a /= np.sum(a)
 
         assert len(a) > 0, "All components pruned"
 
